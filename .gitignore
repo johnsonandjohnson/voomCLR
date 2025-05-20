@@ -1,0 +1,10 @@
+lint_results.txt
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+.Rdata
+.httr-oauth
+.DS_Store
+inst/doc

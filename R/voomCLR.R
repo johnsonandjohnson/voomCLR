@@ -1,0 +1,380 @@
+#' @include utils.R
+
+
+
+#' @name voomCLR
+#' @title Transform RNA-Seq Data Ready for Linear Modelling
+#' @description Transform count data using centered-log-ratio, estimate the
+#' mean-variance relationship and use this to compute appropriate
+#' observation-level weights.
+#'  The data are then ready for linear modelling.
+#' @usage voomCLR(counts, design = NULL, lib.size = NULL,
+#'        normalize.method = "none",
+#'       block = NULL, correlation = NULL, weights = NULL,
+#'       span = 0.5, plot = FALSE, save.plot = FALSE,
+#'       varCalc = "empirical", varDistribution = "NB")
+#' @param counts a numeric \code{matrix} containing raw counts, or an
+#'  \code{ExpressionSet} containing raw counts, or a \code{DGEList} object.
+#'    Counts must be non-negative and NAs are not permitted.
+#' @param design design matrix with rows corresponding to samples and columns
+#'  to coefficients to be estimated.
+#' Defaults to \code{model.matrix(~0+counts$samples$group)} if \code{counts}
+#' is a DGEList, otherwise defaults to the unit vector meaning that all samples
+#'  are treated as replicates.
+#' @param lib.size numeric vector containing total library sizes for each
+#' sample. Defaults to the normalized (effective) library sizes in
+#' \code{counts} if \code{counts} is a \code{DGEList} or to the columnwise
+#'  count totals if \code{counts} is a matrix.
+#' @param normalize.method
+#'    the microarray-style normalization method to be applied to the logCPM
+#'     values (if any). Choices are as for the \code{method} argument of
+#'    \code{normalizeBetweenArrays} when the data is single-channel.
+#'    Any normalization factors found in \code{counts} will still be used even
+#'     if \code{normalize.method="none"}.
+#' @param block vector or factor specifying a blocking variable on the samples.
+#'    Has length equal to the number of \code{ncol(counts)}.
+#' @param correlation
+#'    the intrablock correlation.
+#' @param weights
+#'    prior weights.
+#'    Can be a numeric matrix of individual weights of same dimensions as
+#'    the \code{counts}, or a numeric vector of sample weights with length
+#'    equal to \code{ncol(counts)}, or a numeric vector of gene weights with
+#'     length equal to \code{nrow(counts)}.
+#' @param span
+#'    width of the smoothing window used for the lowess mean-variance trend.
+#'    Expressed as a proportion between 0 and 1.
+#' @param plot
+#'    logical, should a plot of the mean-variance trend be displayed?
+#' @param save.plot
+#'    logical, should the coordinates and line of the plot be saved in the
+#'    output?
+#' @param varCalc
+#' \code{"empirical"} or \code{"analytical"}.
+#' If \code{"empirical"} (default), weights are estimated in the default voom
+#' way, i.e., using the empirical mean-variance trend.
+#' If \code{"analytical"}, weights are analytically calculated using a Delta
+#' method approximation.
+#' @param varDistribution The distribution used to analytically calculate 
+#' (\code{varCalc="analytical"}) the mean-variance weights. 
+#' Either \code{"NB"} (default) or \code{"poisson"}.
+#' @details
+#'  This function is intended to process RNA-seq or ChIP-seq data prior to
+#'   linear modelling in limma.
+#'
+#'  \code{voom} is an acronym for mean-variance modelling at the observational
+#'   level. The idea is to estimate the mean-variance relationship in the data,
+#'    then use this to compute an appropriate precision weight for each
+#'    observation.
+#'  Count data always show marked mean-variance relationships.
+#'  Raw counts show increasing variance with increasing count size, while
+#'  log-counts typically show a decreasing mean-variance trend.
+#'  This function estimates the mean-variance trend for log-counts, then
+#'  assigns a weight to each observation based on its predicted variance.
+#'  The weights are then used in the linear modelling process to adjust for
+#'  heteroscedasticity.
+#'
+#'  \code{voom} performs the following specific calculations.
+#'  First, the counts are converted to logCPM values, adding 0.5 to all the
+#'   counts to avoid taking the logarithm of zero.
+#'  The matrix of logCPM values is then optionally normalized.
+#'  The \code{lmFit} function is used to fit row-wise linear models.
+#'  The \code{lowess} function is then used to fit a trend to the square-root
+#'  residual standard deviations as a function of an average log-count measure.
+#'  The trend line is then used to predict the variance of each logCPM value as
+#'   a function of its fitted value on the count scale, and the inverse
+#'   variances become the estimated precision weights.
+#'
+#'  The optional arguments \code{block}, \code{correlation} and \code{weights}
+#'  are passed to \code{\link{lmFit}} in the above calling sequence, so they
+#'  influence the row-wise standard deviations to which the mean-variance trend
+#'  is fitted.
+#'  The arguments \code{block} and \code{correlation} have the same meaning as
+#'   for \code{\link{lmFit}}.
+#'  Most users will not need to specify the \code{weights} argument but, if
+#'   it is included, then the output \code{weights} are taken to modify the
+#'    input prior weights in a multiplicative fashion.
+#'
+#'  For good results, the \code{counts} matrix should be filtered to remove
+#'   rows with very low counts before running voom().
+#'  The \code{filterByExpr} function in the edgeR package can be used for
+#'   that purpose.
+#'
+#'  If \code{counts} is a \code{DGEList} object from the edgeR package,
+#'  then voom will use the normalization factors found in the object when
+#'   computing the logCPM values.
+#'  In other words, the logCPM values are computed from the effective library
+#'   sizes rather than the raw library sizes.
+#'  If the \code{DGEList} object has been scale-normalized in edgeR, then it is
+#'   usual to leave \code{normalize.method="none"} in voom, i.e., the logCPM
+#'    values should not usually be re-normalized in the \code{voom} call.
+#'
+#'  The \code{voom} method is similar in purpose to the limma-trend method,
+#'   which uses \code{\link{eBayes}} or \code{\link{treat}} with
+#'    \code{trend=TRUE}.
+#'  The voom method incorporates the mean-variance trend into the precision
+#'   weights, whereas limma-trend incorporates the trend into the empirical
+#'    Bayes moderation.
+#'  The voom method takes into account the sequencing depths (library sizes)
+#'   of the individual columns of \code{counts} and applies the mean-variance
+#'    trend on an individual observation basis.
+#'  limma-trend, on the other hand, assumes that the library sizes are not
+#'   wildly different and applies the mean-variance trend on a genewise basis.
+#'  As noted by Law et al (2014), voom should be more powerful than limma-trend
+#'   if the library sizes are very different but, otherwise, the two methods
+#'    should give similar results.
+#'
+#'  Note that \code{edgeR::voomLmFit} is now recommended over \code{voom} for
+#'   sparse counts with a medium to high proportion of zeros.
+#' @note
+#'  \code{voom} is designed to accept counts.
+#'  Usually these will be sequence read counts, but counts of species abundance
+#'   or other biological quantities might also be appropriate.
+#'  Estimated counts are also acceptable provided that the column sums are
+#'   representative of the total library size (total number of reads) for
+#'    that sample.
+#'  \code{voom} can analyse scaled counts provided that the column sums remain
+#'   proportional to the total library sizes.
+#'  \code{voom} is designed to take account of sample-specific library sizes
+#'   and hence \code{voom} should not be used to analyse quantities that have
+#'    been normalized for library size such as RPKM, transcripts per million
+#'     (TPM) or counts per million (CPM).
+#'  Such quantities prevent \code{voom} from inferring the correct library
+#'   sizes and hence the correct precision with which each value was measured.
+#' @return
+#'  An \code{\link[limma:EList]{EList}} object with the following components:
+#'  \item{E}{numeric matrix of normalized expression values on the log scale}
+#'  \item{weights}{numeric matrix of inverse variance weights}
+#'  \item{design}{design matrix}
+#'  \item{lib.size}{numeric vector of total normalized library sizes}
+#'  \item{genes}{dataframe of gene annotation extracted from \code{counts}}
+#'  \item{voom.xy}{if \code{save.plot}, list containing x and y coordinates
+#'   for points in mean-variance plot}
+#'  \item{voom.line}{if \code{save.plot}, list containing coordinates of loess
+#'   line in the mean-variance plot}
+#' @author Charity Law and Gordon Smyth. Adapted to CLR transformation by
+#'  Koen Van den Berge on February 10, 2023.
+#' @references
+#'  Law, CW, Chen, Y, Shi, W, Smyth, GK (2014).
+#'  Voom: precision weights unlock linear model analysis tools for
+#'   RNA-seq read counts.
+#'  \emph{Genome Biology} 15, R29.
+#'  \doi{10.1186/gb-2014-15-2-r29}.
+#'  See also the Preprint Version at
+#'  \url{http://www.statsci.org/smyth/pubs/VoomPreprint.pdf}
+#'  incorporating some notational corrections.
+#'
+#'  Law, CW, Alhamdoosh, M, Su, S, Smyth, GK, Ritchie, ME (2016).
+#'  RNA-seq analysis is easy as 1-2-3 with limma, Glimma and edgeR.
+#'  \emph{F1000Research} 5, 1408.
+#'  \url{https://f1000research.com/articles/5-1408}
+#'
+#'  Law, CW, Alhamdoosh, M, Su, S, Dong, X, Tian, L, Smyth, GK,
+#'   Ritchie, ME (2018).
+#'  RNA-seq analysis is easy as 1-2-3 with limma, Glimma and edgeR.
+#'  \emph{Bioconductor Workflow Package}.
+#'  \url{https://www.bioconductor.org/packages/RNAseq123/}
+#' @seealso
+#'  \code{\link{eBayes}},
+#'  \code{\link{voomWithQualityWeights}}.
+#'  \code{\link{vooma}} is similar to \code{voom} but for microarrays
+#'   instead of RNA-seq.
+#'  \code{voomLmFit} in the edgeR package is a further developed version
+#'   of voom particularly for sparse data.
+#' @examples
+#' library(limma)
+#' set.seed(495212344)
+#' n <- 40 # sample size
+#' P <- 10 # number of cell types
+#' mu0 <- rnbinom(n = P, size = 1 / 2, mu = 400)
+#' mu0 # absolute counts in group 0
+#' beta <- rlnorm(n = P, meanlog = 0, sdlog = 2) * # these are log-fold-changes
+#'   rbinom(n = P, size = 1, prob = .15) *
+#'   sample(c(-1, 1), size = P, replace = TRUE) # fold change on log scale
+#' mu1 <- exp(beta) * mu0 # because we want log(mu2/mu1) = beta
+#' relAbundances <- data.frame(
+#'   g0 = mu0 / sum(mu0),
+#'   g1 = mu1 / sum(mu1)
+#' ) # relative abundance of absolute count
+#' # relative abundance information (observed data in typical experiment)
+#' Y0 <- rmultinom(n = 10, size = 1e4, prob = relAbundances$g0)
+#' Y1 <- rmultinom(n = 10, size = 1e4, prob = relAbundances$g1)
+#' Y <- cbind(Y0, Y1)
+#' rownames(Y) <- paste0("celltype", 1:10)
+#' colnames(Y) <- paste0("sample", 1:20)
+#' group <- factor(rep(0:1, each = 10))
+#' design <- model.matrix(~group)
+#' v <- voomCLR(
+#'   counts = Y,
+#'   design = design,
+#'   lib.size = NULL,
+#'   plot = TRUE
+#' )
+#' @keywords rna-seq
+#' @importFrom limma normalizeBetweenArrays lmFit
+#' @import statmod methods limma
+#' @export
+voomCLR <- function(counts,
+                    design = NULL,
+                    lib.size = NULL,
+                    normalize.method = "none",
+                    block = NULL,
+                    correlation = NULL,
+                    weights = NULL,
+                    span = 0.8,
+                    plot = FALSE,
+                    save.plot = FALSE,
+                    varCalc = "empirical",
+                    varDistribution = "NB") {
+  # 	Linear modelling of count data with mean-variance modelling at the
+  #   observation level.
+  # 	Creates an EList object for entry to lmFit() etc in the limma pipeline.
+  # 	Gordon Smyth and Charity Law
+  # 	Created 22 June 2011.  Last modified 1 May 2021.
+  # Modified by Koen Van den Berge in 2024:
+  # - CLR transformation instead of CPM
+  # - loess fitting now uses average CLR instead of average CPM
+  # - Allow for analytical calculation of standard deviation
+  # TODO:
+  # - limma-trend? Allows for intensity-dependent prior variance per gene.
+
+
+  out <- list()
+  counts <- as.matrix(counts)
+
+  # 	Check counts
+  n <- nrow(counts)
+  if (n < 2L) stop("Need at least two genes to fit a mean-variance trend")
+  m <- min(counts)
+  if (is.na(m)) stop("NA counts not allowed")
+  if (m < 0) stop("Negative counts not allowed")
+
+  # 	Check design
+  if (is.null(design)) {
+    design <- matrix(1, ncol(counts), 1)
+    rownames(design) <- colnames(counts)
+    colnames(design) <- "GrandMean"
+  }
+  
+  # Check additional parameters
+  if ((length(varCalc) != 1) & (!(varCalc %in% c("empirical","analytical")))) {
+    stop("varCalc should be either \"empirical\" or \"analytical\"")
+    }
+  if (varCalc=="analytical") {
+    if ((length(varDistribution)!=1) &
+        (!(varDistribution %in% c("poisson","NB")))) {
+      stop("varDistribution should be either \"NB\" or \"poisson\"")}
+  }
+
+
+  # 	Fit linear model to CLR
+  geoMeans <- exp(colMeans(log(counts + 0.5)))
+  # 	Check lib.size
+  if (is.null(lib.size)) {
+    lib.size <- geoMeans
+  }
+  y <- t(log(t(counts + 0.5) / geoMeans))
+  y <- normalizeBetweenArrays(y, method = normalize.method)
+  fit <- lmFit(y, design, block = block, correlation = correlation,
+               weights = weights)
+  if (is.null(fit$Amean)) fit$Amean <- rowMeans(y, na.rm = TRUE)
+
+  # 	If no replication found, set all weight to 1
+  NWithReps <- sum(fit$df.residual > 0L)
+  if (NWithReps < 2L) {
+    if (NWithReps == 0L) {
+      warning("The experimental design has no replication.
+               Setting weights to 1.")
+    }
+    if (NWithReps == 1L) {
+      warning("Only one gene with any replication.
+               Setting weights to 1.")
+    }
+    out$E <- y
+    out$weights <- y
+    out$weights[] <- 1
+    out$design <- design
+    if (is.null(out$targets)) {
+      out$targets <- data.frame(lib.size = lib.size)
+    } else {
+      out$targets$lib.size <- lib.size
+    }
+    return(new("EList", out))
+  }
+
+  # 	Fit lowess trend to sqrt-standard-deviations by log-count-size
+  sx <- fit$Amean + mean(log(lib.size)) # note that lib.size=geoMeans
+  sy <- sqrt(fit$sigma)
+  allzero <- rowSums(counts) == 0
+  if (any(allzero)) {
+    sx <- sx[!allzero]
+    sy <- sy[!allzero]
+  }
+  l <- lowess(sx, sy, f = span)
+  if (plot) {
+    plot(sx, sy, xlab = "CLR-transformed count",
+         ylab = "Sqrt( standard deviation )",
+         pch = 16, cex = 0.25)
+    title("voom: Mean-variance trend")
+    lines(l, col = "red")
+  }
+
+
+  # 	Find individual quarter-root fitted counts
+  if (fit$rank < ncol(design)) {
+    j <- fit$pivot[1:fit$rank]
+    fitted.values <- fit$coefficients[, j, drop = FALSE] %*%
+      t(fit$design[, j, drop = FALSE])
+  } else {
+    fitted.values <- fit$coefficients %*% t(fit$design)
+  }
+  fittedRatio <- exp(fitted.values)
+  fitted.count <- t(apply(fittedRatio, 1, "*", geoMeans))
+  fitted.logcount <- log(fitted.count)
+
+  # 	Apply trend to individual observations
+  if (varCalc == "empirical") {
+    f <- approxfun(l, rule = 2, ties = list("ordered", mean))
+    w <- 1 / f(fitted.logcount)^4
+    dim(w) <- dim(fitted.logcount)
+  } else if (varCalc == "analytical") {
+    # note that lib.size=geoMeans
+    geoMeanMat <- matrix(geoMeans,
+      nrow = nrow(counts), ncol = ncol(counts),
+      byrow = TRUE
+    )
+    yBarFit <- exp(fitted.values) * geoMeanMat
+    if (varDistribution == "poisson") {
+      # calculate variances based on Poisson Delta method approximation
+      estVar <- ((nrow(counts) - 1) / nrow(counts))^2 * (1 / (yBarFit))
+      w <- 1 / estVar
+    } else if (varDistribution == "NB") {
+      phi <- .estimateNBDispersion(
+        counts,
+        design
+      )
+      # calculate variances based on NB Delta method approximation
+      estVar <- ((nrow(counts) - 1) / nrow(counts))^2 * ((1 / yBarFit) + phi)
+      w <- 1 / estVar
+    }
+  }
+
+
+  # 	Output
+  out$E <- y
+  out$weights <- w
+  out$design <- design
+  if (is.null(out$targets)) {
+    out$targets <- data.frame(lib.size = lib.size)
+  } else {
+    out$targets$lib.size <- lib.size
+  }
+  if (save.plot) {
+    out$voom.xy <- list(x = sx, y = sy,
+                        xlab = "CLR-transformed count",
+                        ylab = "Sqrt( standard deviation )")
+    out$voom.line <- l
+  }
+
+  new("EList", out)
+}

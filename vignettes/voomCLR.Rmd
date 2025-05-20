@@ -1,0 +1,304 @@
+---
+title: "Introduction to voomCLR"
+author: 
+  - name: "Koen Van den Berge"
+    affiliation:
+    - "Janssen Research and Development"
+    email: "kvande14@its.jnj.com"
+output: 
+  BiocStyle::html_document:
+    self_contained: yes
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    code_folding: show
+date: "`r doc_date()`"
+package: "`r pkg_ver('voomCLR')`"
+vignette: >
+  %\VignetteIndexEntry{Introduction to voomCLR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  crop = NULL
+)
+```
+
+
+```{r vignetteSetup, echo=FALSE, message=FALSE, warning = FALSE}
+## Track time spent on making the vignette
+startTime <- Sys.time()
+
+## Bib setup
+library("RefManageR")
+
+## Write bibliography information
+bib <- c(
+  R = citation(),
+  BiocStyle = citation("BiocStyle")[1],
+  knitr = citation("knitr")[1],
+  RefManageR = citation("RefManageR")[1],
+  rmarkdown = citation("rmarkdown")[1],
+  sessioninfo = citation("sessioninfo")[1],
+  testthat = citation("testthat")[1],
+  voomCLR = citation("voomCLR")[1],
+  limma = citation("limma")[1]
+)
+```
+
+# Installation
+
+If installation within `R` using the `install.packages` function does not succeed, you may want to try using the Terminal command `R CMD INSTALL dir`, where `dir` is replaced by the path to the `voomCLR` directory.
+
+# Introduction
+
+The `voomCLR` workflow works much as a usual limma-voom workflow, with two changes:
+
+ - The `voom` function is replaced by a `voomCLR` function. This function transforms the counts using a centered-log-ratio (CLR) transformation, and estimates observation-level heteroscedasticity weights. The latter can be estimated empirically or analytically, as specified using the `varCalc` argument. 
+ - The `topTable` function for performing statistical inference is replaced by a `topTableBC` function, where the `BC` stands for bias correction. Before performing inference, the parameter estimates are bias corrected. The uncertainty involved in estimating the bias term can be accommodated using bootstrapping, as specified via the `bootstrap` argument.
+ 
+With respect to the `topTableBC` function, it is important to note that the bias correction only makes sense for testing differences. For example, when testing the difference in expected transformed expression values between groups, as we do below. When testing a baseline mean, e.g. when you are interested in testing whether a feature's average abundance is different from zero (or any other value), the bias correction makes no sense, and one should fall back to the original `topTable` function.
+This is because the bias correction leverages that the mode of the parameters should be zero, which comes from assuming that most cell types are not differentially abundant for the specific contrast of interest. Generalizing this to an average abundance test, it makes no sense to assume that most of the cell types in our dataset are not present (i.e., their average abundance is zero).
+ 
+
+# Transformation, variance weights and model fitting
+
+Simulate a dataset.
+
+```{r}
+set.seed(495212344)
+n <- 40 # sample size
+P <- 10 # number of cell types
+mu0 <- rnbinom(n = P, size = 1 / 2, mu = 400)
+mu0 # absolute counts in group 0
+beta <- rlnorm(n = P, meanlog = 0, sdlog = 2) * # these are log-fold-changes
+  rbinom(n = P, size = 1, prob = .15) *
+  sample(c(-1, 1), size = P, replace = TRUE) # fold change on log scale
+mu1 <- exp(beta) * mu0 # because we want log(mu2/mu1) = beta
+relAbundances <- data.frame(
+  g0 = mu0 / sum(mu0),
+  g1 = mu1 / sum(mu1)
+) # relative abundance of absolute count
+# relative abundance information (observed data in typical experiment)
+Y0 <- rmultinom(n = n/2, size = 1e4, prob = relAbundances$g0)
+Y1 <- rmultinom(n = n/2, size = 1e4, prob = relAbundances$g1)
+Y <- cbind(Y0, Y1)
+rownames(Y) <- paste0("celltype", 1:10)
+colnames(Y) <- paste0("sample", 1:20)
+group <- factor(rep(0:1, each = 10))
+```
+
+## Fixed effects model
+
+```{r}
+library(limma)
+library(voomCLR)
+design <- model.matrix(~group)
+v <- voomCLR(
+  counts = Y,
+  design = design
+)
+fitFE <- lmFit(v, design)
+fitFE <- eBayes(fitFE)
+```
+
+
+## Approximating a random intercept using `limma::duplicateCorrelation`
+
+Here, we approximate a random intercept model using the `patient` variable.
+
+```{r}
+patient <- rep(paste0("patient", 1:10), 2)
+v <- voomCLR(
+  counts = Y,
+  design = design,
+  lib.size = NULL
+)
+## estimate correlation within block
+cf <- duplicateCorrelation(v, design, block = patient)
+## re-estimate weights conditional on estimated correlation
+v <- voomCLR(
+  counts = Y,
+  design = design,
+  lib.size = NULL,
+  block = patient,
+  correlation = cf$consensus
+)
+## use 'final' weights to get 'final' estimate of within-block correlation.
+cf <- duplicateCorrelation(v, design, block = patient)
+fit <- lmFit(v, design,
+  block = patient,
+  correlation = cf$consensus
+)
+plotBeta(fit) # view distribution of estimated coefficients and their mode
+fit <- eBayes(fit)
+```
+
+## Analytical heteroscedasticity weights calculation
+
+When there is a limited number of features in your dataset, the empirical mean-variance trend may be highly uncertain, and it could be a better idea to estimate the heteroscedasticity weights analytically.
+
+This can be specified using the `varCalc` argument in the `voomCLR` function. By default, it is set to `"empirical"` which uses the limma-voom implementation of empirically estimating the mean-variance trend. Analytical weights can be calculated by setting `varCalc="analytical"`. By default, we use the negative binomial distribution (`varDistribution="NB"`).
+
+```{r}
+v <- voomCLR(
+  counts = Y,
+  design = design,
+  varCalc = "analytical"
+)
+fitNBW <- lmFit(v, design)
+fitNBW <- eBayes(fitNBW)
+```
+
+
+# Statistical inference
+
+The `topTableBC` function works like the original `topTable` function.
+Mean model parameters can be specified via a number or character vector.
+
+```{r}
+tt1 <- topTableBC(fitFE, coef = 2, n = Inf)
+tt2 <- topTableBC(fitFE, coef = "group1", n = Inf)
+identical(tt1, tt2)
+head(tt1)
+```
+
+## Assessing specific contrasts
+
+Sometimes, the contrast of interest may relate to a linear combination of model parameters, rather than a single model parameter. 
+In the `limma` framework, we would build contrasts using the `contrasts.fit` function.
+Below, we show a simple example.
+
+```{r}
+design <- model.matrix(~group)
+v <- voomCLR(
+  counts = Y,
+  design = design
+) # span for the lowess smoother
+fit <- lmFit(v, design)
+## build the contrast matrix
+cm <- matrix(0, nrow = ncol(fit$coefficients), ncol = 1)
+rownames(cm) <- colnames(fit$coefficients)
+colnames(cm) <- "group1vs0"
+cm["group1", "group1vs0"] <- 1
+## reparameterize model => one contrast is now one model parameter
+contFit <- contrasts.fit(fit, contrasts = cm)
+contFit <- eBayes(contFit)
+tt <- topTableBC(contFit, coef = 1, n = Inf)
+head(tt) # note results are identical.
+```
+
+## Bootstrapping
+
+The `topTableBC` function implements the bias correction procedure suggested by [Zhou et al. (2022)](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02655-5). Estimation of the bias term involves uncertainty, and we can propagate that uncertainty in the statistical inference via bootstrapping. While both a non-parametric and parametric bootstrap is implemented, we recommend parametric bootstrapping, as it has led to slightly better performances in our evaluations.
+
+Depending on how you have specified the mean model parameter(s) to test, additional arguments may be needed, as we show below.
+
+```{r}
+v <- voomCLR(
+  counts = Y,
+  design = design
+) # span for the lowess smoother
+fit <- lmFit(v, design)
+fit <- eBayes(fit)
+
+## specifying number or character
+ttBoot1 <- topTableBC(fit,
+  coef = 2, n = Inf,
+  bootstrap = "parametric",
+  voomWeights = v$weights
+)
+
+
+## using contrast matrix: also provide this matrix,
+## specifying the relevant column.
+contFit <- contrasts.fit(fit, contrasts = cm)
+contFit <- eBayes(contFit)
+ttBoot2 <- topTableBC(contFit,
+  coef = 1, n = Inf,
+  bootstrap = "parametric",
+  voomWeights = v$weights,
+  contrastMatrix = cm[, 1, drop = FALSE]
+)
+```
+
+
+# Citing `voomCLR`
+
+We hope that `r Biocpkg("voomCLR")` will be useful for your research. Please use the following information to cite the package and the overall approach. Thank you!
+
+```{r "citation"}
+## Citation info
+citation("voomCLR")
+```
+
+
+# Reproducibility
+
+The `r Biocpkg("voomCLR")` package `r Citep(bib[["voomCLR"]])` was made possible thanks to:
+
+* R `r Citep(bib[["R"]])`
+* `r Biocpkg("limma")` `r Citep(bib[["limma"]])`
+* `r Biocpkg("BiocStyle")` `r Citep(bib[["BiocStyle"]])`
+* `r CRANpkg("knitr")` `r Citep(bib[["knitr"]])`
+* `r CRANpkg("RefManageR")` `r Citep(bib[["RefManageR"]])`
+* `r CRANpkg("rmarkdown")` `r Citep(bib[["rmarkdown"]])`
+* `r CRANpkg("sessioninfo")` `r Citep(bib[["sessioninfo"]])`
+* `r CRANpkg("testthat")` `r Citep(bib[["testthat"]])`
+
+This package was developed using `r BiocStyle::Biocpkg("biocthis")`.
+
+
+Code for creating the vignette
+
+```{r createVignette, eval=FALSE}
+## Create the vignette
+library("rmarkdown")
+system.time(render("voomCLR.Rmd", "BiocStyle::html_document"))
+
+## Extract the R code
+library("knitr")
+knit("voomCLR.Rmd", tangle = TRUE)
+```
+
+Date the vignette was generated.
+
+```{r reproduce1, echo=FALSE}
+## Date the vignette was generated
+Sys.time()
+```
+
+Wallclock time spent generating the vignette.
+
+```{r reproduce2, echo=FALSE}
+## Processing time in seconds
+totalTime <- diff(c(startTime, Sys.time()))
+round(totalTime, digits = 3)
+```
+
+`R` session information.
+
+```{r reproduce3, echo=FALSE}
+## Session info
+library("sessioninfo")
+options(width = 120)
+session_info()
+```
+
+
+
+# Bibliography
+
+This vignette was generated using `r Biocpkg("BiocStyle")` `r Citep(bib[["BiocStyle"]])`
+with `r CRANpkg("knitr")` `r Citep(bib[["knitr"]])` and `r CRANpkg("rmarkdown")` `r Citep(bib[["rmarkdown"]])` running behind the scenes.
+
+Citations made with `r CRANpkg("RefManageR")` `r Citep(bib[["RefManageR"]])`.
+
+```{r vignetteBiblio, results = "asis", echo = FALSE, warning = FALSE, message = FALSE}
+## Print bibliography
+PrintBibliography(bib, .opts = list(hyperlink = "to.doc", style = "html"))
+```

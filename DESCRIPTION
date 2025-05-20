@@ -1,0 +1,43 @@
+Package: voomCLR
+Title: Compositional analysis of cell count data.
+Version: 0.99.37
+Authors@R: 
+    person("Koen", "Van den Berge", , "koen.vdberge@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-1833-8478"))
+Description: voomCLR allows for compositional analysis of cell (type/state) counts, taking
+ into account heteroscedasticity and bias. It transforms cell count data using the
+ centered-log-ratio (CLR) transformation, and estimates observation-level variances 
+ by leveraging the limma-voom framework and codebase or calculating them analytically. 
+ Residual variances are shrunken using the limma empirical Bayes technique.
+ Finally, a bias correction is applied as recommended in Zhou et al. (2022), 
+ 10.1186/s13059-022-02655-5. The uncertainty involved in estimating the bias term can be
+ taken into account using bootstrapping.
+biocViews: software, single-cell.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Imports: 
+    limma,
+    methods,
+    statmod,
+    modeest,
+    mixtools,
+    edgeR
+Suggests: 
+    BiocStyle,
+    covr,
+    knitr,
+    RefManageR,
+    rmarkdown,
+    sessioninfo,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+Collate: 
+    'utils.R'
+    'applyBiasCorrection.R'
+    'plotBeta.R'
+    'topTableBC.R'
+    'voomALR.R'
+    'voomCLR.R'
