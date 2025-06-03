@@ -32,7 +32,9 @@ devtools::install_github("koenvandenberge/voomCLR")
 
 The vignette of voomCLR walks you through the basics of using `voomCLR`.
 
+# Analysis code of the paper
 
+All analysis code of the paper can be found at https://github.com/koenvandenberge/voomCLRPaper.
 
 
 
