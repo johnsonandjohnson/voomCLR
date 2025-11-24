@@ -21,6 +21,7 @@
                          sigma2post = NULL,
                          contrastMatrix = NULL,
                          returnVars = FALSE,
+                         bias = NULL,
                          ...) {
   # 	Summary table of top genes for a single coefficient
   # 	Original author: Gordon Smyth
@@ -116,9 +117,12 @@
   }
 
   # Bias calculation
-  bias <- apply(fit$coefficients, 2, function(x) {
-    .getMode(x, n = n)
-  })
+  if(!is.null(bias)){
+    bias <- apply(fit$coefficients, 2, function(x) {
+      .getMode(x, n = n)
+    })
+  }
+  
 
   # 	Extract statistics for table
   M <- fit$coefficients[, coef] - bias[coef]
@@ -354,6 +358,9 @@
 #'   specifying the confidence level required.
 #' @param returnVars Logical: should all variance components be returned?
 #' Only applicable if using bootstrapping.
+#' @param bias An optional vector of length equal to the number of coefficients,
+#'  with each element specifying the compositional bias to be corrected. This overrules
+#'  bias calculation via the mode across all cell types, for a given coefficient.
 #' @param dots other \code{topTreat} arguments are passed to \code{topTableBC}.
 #' @return
 #'   A dataframe with a row for the \code{number} top genes and the
@@ -540,7 +547,8 @@ topTableBC <- function(fit,
                        bootstrap = FALSE,
                        voomWeights = NULL,
                        contrastMatrix = NULL,
-                       returnVars = FALSE) {
+                       returnVars = FALSE,
+                       bias = NULL) {
   # 	Summary table of top genes, object-orientated version
   # 	Gordon Smyth
   # 	4 August 2003.  Last modified 20 Aug 2022.
@@ -650,7 +658,8 @@ topTableBC <- function(fit,
     voomWeights = voomWeights,
     sigma2post = fit$s2.post,
     contrastMatrix = contrastMatrix,
-    returnVars = returnVars
+    returnVars = returnVars,
+    bias = bias
   )
   return(tt)
 }
