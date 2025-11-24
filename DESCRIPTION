@@ -1,6 +1,6 @@
 Package: voomCLR
 Title: Compositional analysis of cell count data.
-Version: 0.99.38
+Version: 0.99.39
 Authors@R: 
     person("Koen", "Van den Berge", , "koen.vdberge@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-1833-8478"))

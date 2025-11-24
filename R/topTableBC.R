@@ -21,18 +21,19 @@
                          sigma2post = NULL,
                          contrastMatrix = NULL,
                          returnVars = FALSE,
+                         bias = NULL,
                          ...) {
   # 	Summary table of top genes for a single coefficient
   # 	Original author: Gordon Smyth
   # 	Created 21 Nov 2002. Was called toptable() until 1 Feb 2018.
   #   Last revised 12 Apr 2020.
   # Adapted by Koen Van den Berge to include bias correction in 2024.
-
-
+  
+  
   # 	Check fit
   fit$coefficients <- as.matrix(fit$coefficients)
   rn <- rownames(fit$coefficients)
-
+  
   # 	Check coef is length 1
   if (length(coef) > 1) {
     coef <- coef[1]
@@ -41,12 +42,12 @@
       " only first value of coef being used"
     ))
   }
-
+  
   # 	Ensure genelist is a data.frame
   if (!is.null(genelist) && is.null(dim(genelist))) {
     genelist <- data.frame(ID = genelist, stringsAsFactors = FALSE)
   }
-
+  
   # 	Check rownames
   if (is.null(rn)) {
     rn <- seq_len(nrow(fit$coefficients))
@@ -62,7 +63,7 @@
       rn <- seq_len(nrow(fit$coefficients))
     }
   }
-
+  
   # 	Check sort.by
   sort.by <- match.arg(
     sort.by,
@@ -75,7 +76,7 @@
   if (sort.by == "A" || sort.by == "Amean") sort.by <- "AveExpr"
   if (sort.by == "T") sort.by <- "t"
   if (sort.by == "p") sort.by <- "P"
-
+  
   # 	Check resort.by
   if (!is.null(resort.by)) {
     resort.by <- match.arg(resort.by, c(
@@ -87,7 +88,7 @@
     if (resort.by == "p") resort.by <- "P"
     if (resort.by == "T") resort.by <- "t"
   }
-
+  
   # 	Check A
   if (is.null(A)) {
     if (sort.by == "A") {
@@ -96,7 +97,7 @@
   } else {
     if (NCOL(A) > 1) A <- rowMeans(A, na.rm = TRUE)
   }
-
+  
   # 	Check for lods component
   if (is.null(eb$lods)) {
     if (sort.by == "B") {
@@ -114,12 +115,15 @@
       }
     }
   }
-
+  
   # Bias calculation
-  bias <- apply(fit$coefficients, 2, function(x) {
-    .getMode(x, n = n)
-  })
-
+  if(!is.null(bias)){
+    bias <- apply(fit$coefficients, 2, function(x) {
+      .getMode(x, n = n)
+    })
+  }
+  
+  
   # 	Extract statistics for table
   M <- fit$coefficients[, coef] - bias[coef]
   se_coef <- as.matrix(fit$coefficients / eb$t)[, coef]
@@ -161,22 +165,22 @@
         var_mode <- rep(parBootOut$varMode, length(rn))
         cov_mode <- parBootOut$covMode
       }
-
+      
       tstat <- as.matrix(M / sqrt(varCombined))
     }
   } else { # bootstrap is NULL
     tstat <- as.matrix(M / se_coef)
   }
   df_coef <- matrix(eb$df.total,
-    dimnames = list(names(tstat))
+                    dimnames = list(names(tstat))
   )
   P.Value <- as.matrix(2 * pt(abs(tstat),
-                         df = df_coef, lower.tail = FALSE
-                       ))
-
+                              df = df_coef, lower.tail = FALSE
+  ))
+  
   # 	Apply multiple testing adjustment
   adj.P.Value <- p.adjust(P.Value, method = adjust.method)
-
+  
   # 	Thin out fit by p.value and lfc thresholds
   if (p.value < 1 || lfc > 0) {
     sig <- (adj.P.Value <= p.value) & (abs(M) >= lfc)
@@ -191,7 +195,7 @@
     P.Value <- P.Value[sig]
     adj.P.Value <- adj.P.Value[sig]
     rn <- rn[sig]
-
+    
     if (returnVars) {
       if (bootstrap == "nonparametric") {
         var_mode <- var_mode[sig]
@@ -201,29 +205,29 @@
       }
     }
   }
-
+  
   # 	Are enough rows left?
   if (length(M) < number) number <- length(M)
   if (number < 1) {
     return(data.frame())
   }
-
+  
   # 	Select top rows
   ord <- switch(sort.by,
-    logFC = order(abs(M), decreasing = TRUE),
-    AveExpr = order(A, decreasing = TRUE),
-    P = order(P.Value, decreasing = FALSE),
-    t = order(abs(tstat), decreasing = TRUE),
-    none = seq_along(M)
+                logFC = order(abs(M), decreasing = TRUE),
+                AveExpr = order(A, decreasing = TRUE),
+                P = order(P.Value, decreasing = FALSE),
+                t = order(abs(tstat), decreasing = TRUE),
+                none = seq_along(M)
   )
   top <- ord[1:number]
-
+  
   # 	Assemble output data.frame
   if (is.null(genelist)) {
     tab <- data.frame(logFC = M[top])
   } else {
     tab <- data.frame(genelist[top, , drop = FALSE],
-      logFC = M[top], stringsAsFactors = FALSE
+                      logFC = M[top], stringsAsFactors = FALSE
     )
   }
   if (confint) {
@@ -238,44 +242,44 @@
     tab$CI.R <- M[top] + margin.error
   }
   if (!is.null(A)) tab$AveExpr <- A[top]
-
+  
   if (!returnVars) {
     tab <- data.frame(tab,
-      t = tstat[top], P.Value = P.Value[top],
-      adj.P.Val = adj.P.Value[top]
+                      t = tstat[top], P.Value = P.Value[top],
+                      adj.P.Val = adj.P.Value[top]
     )
     rownames(tab) <- rn[top]
   } else if (returnVars) {
     if (bootstrap == "nonparametric") {
       tab <- data.frame(tab,
-        t = tstat[top], P.Value = P.Value[top],
-        adj.P.Val = adj.P.Value[top],
-        var.coef = se_coef[top]^2,
-        var.mode = var_mode[top]
+                        t = tstat[top], P.Value = P.Value[top],
+                        adj.P.Val = adj.P.Value[top],
+                        var.coef = se_coef[top]^2,
+                        var.mode = var_mode[top]
       )
     } else if (bootstrap == "parametric") {
       tab <- data.frame(tab,
-        t = tstat[top], P.Value = P.Value[top],
-        adj.P.Val = adj.P.Value[top],
-        var.coef = se_coef[top]^2,
-        var.mode = var_mode[top],
-        cov.mode = cov_mode[top]
+                        t = tstat[top], P.Value = P.Value[top],
+                        adj.P.Val = adj.P.Value[top],
+                        var.coef = se_coef[top]^2,
+                        var.mode = var_mode[top],
+                        cov.mode = cov_mode[top]
       )
     }
     rownames(tab) <- rn[top]
   }
-
+  
   # 	Resort table
   if (!is.null(resort.by)) {
     ord <- switch(resort.by,
-      logFC = order(tab$logFC, decreasing = TRUE),
-      AveExpr = order(tab$AveExpr, decreasing = TRUE),
-      P = order(tab$P.Value, decreasing = FALSE),
-      t = order(tab$t, decreasing = TRUE)
+                  logFC = order(tab$logFC, decreasing = TRUE),
+                  AveExpr = order(tab$AveExpr, decreasing = TRUE),
+                  P = order(tab$P.Value, decreasing = FALSE),
+                  t = order(tab$t, decreasing = TRUE)
     )
     tab <- tab[ord, ]
   }
-
+  
   tab
 }
 
@@ -354,6 +358,9 @@
 #'   specifying the confidence level required.
 #' @param returnVars Logical: should all variance components be returned?
 #' Only applicable if using bootstrapping.
+#' @param bias An optional vector of length equal to the number of coefficients,
+#'  with each element specifying the compositional bias to be corrected. This overrules
+#'  bias calculation via the mode across all cell types, for a given coefficient.
 #' @param dots other \code{topTreat} arguments are passed to \code{topTableBC}.
 #' @return
 #'   A dataframe with a row for the \code{number} top genes and the
@@ -540,12 +547,13 @@ topTableBC <- function(fit,
                        bootstrap = FALSE,
                        voomWeights = NULL,
                        contrastMatrix = NULL,
-                       returnVars = FALSE) {
+                       returnVars = FALSE,
+                       bias = NULL) {
   # 	Summary table of top genes, object-orientated version
   # 	Gordon Smyth
   # 	4 August 2003.  Last modified 20 Aug 2022.
-
-
+  
+  
   # 	Check fit
   if (!is(fit, "MArrayLM")) stop("fit must be an MArrayLM object")
   if (is.null(fit$t) && is.null(fit$F)) {
@@ -561,13 +569,13 @@ topTableBC <- function(fit,
     if (length(bootstrap)!=1) {
       stop("bootstrap should either be \"nonparametric\",
            \"parametric\" or FALSE")
-      }
+    }
     if (!(bootstrap %in% c("nonparametric","parametric"))) {
       stop("bootstrap should either be \"nonparametric\", \"parametric\" or 
            FALSE")
-      }
+    }
   }
-
+  
   # Check weights when bootstrapping
   if (isTRUE(bootstrap == "parametric")) {
     if (is.null(voomWeights)) {
@@ -577,7 +585,7 @@ topTableBC <- function(fit,
       ))
     }
   }
-
+  
   # 	Check coef
   if (is.null(coef)) {
     if (is.null(fit$treat.lfc)) {
@@ -594,11 +602,11 @@ topTableBC <- function(fit,
       coef <- ncol(fit)
     }
   }
-
-
+  
+  
   # 	Check adjust.method
   if (is.null(adjust.method)) adjust.method <- "BH"
-
+  
   # Check contrast matrix
   if (!is.null(contrastMatrix)) {
     if (ncol(contrastMatrix) > 1) {
@@ -608,7 +616,7 @@ topTableBC <- function(fit,
       ))
     }
   }
-
+  
   # 	Set log2-fold-change cutoff
   if (is.null(fc)) {
     if (is.null(lfc)) lfc <- 0
@@ -616,7 +624,7 @@ topTableBC <- function(fit,
     if (fc < 1) stop("fc must be greater than or equal to 1")
     lfc <- log2(fc)
   }
-
+  
   # 	If testing for multiple coefficients,
   #   call low-level topTable function for F-statistics
   if (length(coef) > 1) {
@@ -625,7 +633,7 @@ topTableBC <- function(fit,
       stop("Treat p-values can only be displayed for single coefficients")
     }
   }
-
+  
   # 	Call low-level topTable function for t-statistics
   n <- nrow(fit$design)
   fit <- unclass(fit)
@@ -650,7 +658,8 @@ topTableBC <- function(fit,
     voomWeights = voomWeights,
     sigma2post = fit$s2.post,
     contrastMatrix = contrastMatrix,
-    returnVars = returnVars
+    returnVars = returnVars,
+    bias = bias
   )
   return(tt)
 }
