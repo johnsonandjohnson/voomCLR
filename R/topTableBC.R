@@ -117,7 +117,7 @@
   }
   
   # Bias calculation
-  if(!is.null(bias)){
+  if(is.null(bias)){
     bias <- apply(fit$coefficients, 2, function(x) {
       .getMode(x, n = n)
     })
