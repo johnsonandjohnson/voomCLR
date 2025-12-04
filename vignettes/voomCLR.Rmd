@@ -87,9 +87,9 @@ relAbundances <- data.frame(
 Y0 <- rmultinom(n = n/2, size = 1e4, prob = relAbundances$g0)
 Y1 <- rmultinom(n = n/2, size = 1e4, prob = relAbundances$g1)
 Y <- cbind(Y0, Y1)
-rownames(Y) <- paste0("celltype", 1:10)
-colnames(Y) <- paste0("sample", 1:20)
-group <- factor(rep(0:1, each = 10))
+rownames(Y) <- paste0("celltype", 1:P)
+colnames(Y) <- paste0("sample", 1:n)
+group <- factor(rep(0:1, each = n/2))
 ```
 
 ## Fixed effects model
@@ -112,7 +112,7 @@ fitFE <- eBayes(fitFE)
 Here, we approximate a random intercept model using the `patient` variable.
 
 ```{r}
-patient <- rep(paste0("patient", 1:10), 2)
+patient <- rep(paste0("patient", 1:(n/2)), 2)
 v <- voomCLR(
   counts = Y,
   design = design,
@@ -178,7 +178,7 @@ design <- model.matrix(~group)
 v <- voomCLR(
   counts = Y,
   design = design
-) # span for the lowess smoother
+)
 fit <- lmFit(v, design)
 ## build the contrast matrix
 cm <- matrix(0, nrow = ncol(fit$coefficients), ncol = 1)
@@ -224,7 +224,25 @@ ttBoot2 <- topTableBC(contFit,
   voomWeights = v$weights,
   contrastMatrix = cm[, 1, drop = FALSE]
 )
+ttBoot2
+
 ```
+
+
+# Empirical Bayes estimation of the bias
+
+In exceptional cases, it can be useful to adopt an empirical Bayes approach to estimating the bias term. Such exception cases include experiments where
+
+ - Cell type abundance change is measured as a function of distance to an entity, these distances are then binned and the differential abundance analysis is performed for every bin;
+ - A longitudinal setting where many subjects are followed over several timepoints, and one expects the compositional bias to be similar across timepoints.
+
+These situations share that the compositional bias can be expected to be similar across several distance bins or time points. In such a scenario it is natural to assume that the bias terms across all distance bins or time points come from the same distribution.
+
+
+```{r}
+
+```
+
 
 
 # Citing `voomCLR`

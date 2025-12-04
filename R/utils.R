@@ -35,6 +35,14 @@
 }
 
 ### PARAMETRIC BOOTSTRAP
+## for dev:
+# beta = fit$coefficients
+# design = design
+# sigma2 = sigma2post
+# weights = voomWeights
+# n = n
+# L = contrastMatrix
+# R = 4e3
 .parametricBootstrap <- function(beta,
                                  design,
                                  sigma2,
@@ -83,7 +91,7 @@
     nrow = nrow(beta), ncol = ncol(beta),
     dimnames = dimnames(beta)
   )
-  for (pp in seq_along(length(simBetaList))) {
+  for (pp in seq_len(length(simBetaList))) {
     for (cc in seq_len(ncol(modeMat))) {
       covMat[pp, cc] <- cov(simBetaList[[pp]][, cc], modeMat[, cc])
     }

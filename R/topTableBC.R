@@ -1,6 +1,12 @@
 #' @include utils.R
 
 
+### for dev:
+# A = NULL
+# eb = fit[ebcols]
+# resort.by = NULL
+# lfc = 0
+# sigma2post = fit$s2.post
 
 .toptableTBC <- function(fit,
                          n,
