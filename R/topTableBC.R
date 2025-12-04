@@ -8,6 +8,7 @@
 # lfc = 0
 # sigma2post = fit$s2.post
 
+
 .toptableTBC <- function(fit,
                          n,
                          design = NULL,
@@ -39,6 +40,7 @@
   # 	Check fit
   fit$coefficients <- as.matrix(fit$coefficients)
   rn <- rownames(fit$coefficients)
+
 
   # 	Check coef is length 1
   if (length(coef) > 1) {
@@ -129,7 +131,6 @@
     })
   }
   
-
   # 	Extract statistics for table
   M <- fit$coefficients[, coef] - bias[coef]
   se_coef <- as.matrix(fit$coefficients / eb$t)[, coef]
@@ -178,15 +179,16 @@
     tstat <- as.matrix(M / se_coef)
   }
   df_coef <- matrix(eb$df.total,
-    dimnames = list(names(tstat))
+
+                    dimnames = list(names(tstat))
   )
   P.Value <- as.matrix(2 * pt(abs(tstat),
-                         df = df_coef, lower.tail = FALSE
-                       ))
-
+                              df = df_coef, lower.tail = FALSE
+  ))
+  
   # 	Apply multiple testing adjustment
   adj.P.Value <- p.adjust(P.Value, method = adjust.method)
-
+  
   # 	Thin out fit by p.value and lfc thresholds
   if (p.value < 1 || lfc > 0) {
     sig <- (adj.P.Value <= p.value) & (abs(M) >= lfc)
@@ -227,7 +229,6 @@
     none = seq_along(M)
   )
   top <- ord[1:number]
-
   # 	Assemble output data.frame
   if (is.null(genelist)) {
     tab <- data.frame(logFC = M[top])
@@ -253,6 +254,7 @@
     tab <- data.frame(tab,
       t = tstat[top], P.Value = P.Value[top],
       adj.P.Val = adj.P.Value[top]
+
     )
     rownames(tab) <- rn[top]
   } else if (returnVars) {
@@ -270,6 +272,7 @@
         var.coef = se_coef[top]^2,
         var.mode = var_mode[top],
         cov.mode = cov_mode[top]
+
       )
     }
     rownames(tab) <- rn[top]
@@ -559,7 +562,6 @@ topTableBC <- function(fit,
   # 	Gordon Smyth
   # 	4 August 2003.  Last modified 20 Aug 2022.
 
-
   # 	Check fit
   if (!is(fit, "MArrayLM")) stop("fit must be an MArrayLM object")
   if (is.null(fit$t) && is.null(fit$F)) {
@@ -608,7 +610,6 @@ topTableBC <- function(fit,
       coef <- ncol(fit)
     }
   }
-
 
   # 	Check adjust.method
   if (is.null(adjust.method)) adjust.method <- "BH"
